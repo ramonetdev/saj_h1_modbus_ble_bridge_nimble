@@ -1,12 +1,8 @@
 #include <esphome/core/log.h>
+#include <NimBLEDevice.h>
+#include <queue>
 #include <algorithm>
-#if !defined(ARDUINO)
-#include <unistd.h>
-#include <sys/ioctl.h>
-#endif
-
-#include "modbus_ble_bridge.h"
-#include "modbus_types.h"
+#include "esphome/components/mqtt/mqtt_client.h"
 
 #define BLE_SERVICE 0xFFFF
 #define BLE_CHAR_READ 0xFF02
@@ -17,26 +13,82 @@ namespace modbus_ble_bridge {
 
 static const char *const TAG = "modbus_ble_bridge";
 
+// Variables de salud/watchdog
+unsigned long last_good_frame_ms_ = 0;
+unsigned long last_heartbeat_ms_ = 0;
+int reconnect_attempts_ = 0;
+const int max_reconnect_attempts_ = 3;
+const unsigned long stall_threshold_ms_ = 30000;   // 30 s sin respuesta
+const unsigned long heartbeat_interval_ms_ = 10000; // cada 10 s
+
 void ModbusBleBridge::setup() {
-  ESP_LOGI(TAG, "Setting up Modbus BLE Bridge");
+  ESP_LOGI(TAG, "Setting up Modbus BLE Bridge (NimBLE)");
+  NimBLEDevice::init("");
+  NimBLEDevice::setPower(ESP_PWR_LVL_P7);
   this->total_calls_ = 0;
   this->total_errors_ = 0;
+  last_good_frame_ms_ = millis();
 }
 
 void ModbusBleBridge::loop() {
   uint64_t now = millis();
-  if (!esphome::network::is_connected()) {
-    if (now - this->last_wifi_check_ >= 5000) {
-      ESP_LOGW(TAG, "WiFi not connected");
-      this->last_wifi_check_ = now;
-    }
-    return;
-  }
-
   startModbusTCPServer();
-  checkBLETimeout();  // Existing client will be disconnected if BLE timeout occurs
-  handleTCPConnection();  // If there is no client, it will accept a new one
+  checkBLETimeout();
+  handleTCPConnection();
   handleModbusTCP();
+  watchdog(now);
+  heartbeat(now);
+}
+
+void ModbusBleBridge::watchdog(uint64_t now) {
+  if (now - last_good_frame_ms_ > stall_threshold_ms_) {
+    ESP_LOGW(TAG, "BLE stalled for %llu ms, attempting soft reconnect", now - last_good_frame_ms_);
+    softReconnect();
+  }
+}
+
+void ModbusBleBridge::heartbeat(uint64_t now) {
+  if (now - last_heartbeat_ms_ > heartbeat_interval_ms_) {
+    last_heartbeat_ms_ = now;
+    unsigned long idle = now - last_good_frame_ms_;
+
+    // Log local
+    ESP_LOGI(TAG, "[HB] status=OK idle_ms=%lu calls=%d errors=%d",
+             idle, this->total_calls_, this->total_errors_);
+
+    // Publicación MQTT
+    if (App.get_mqtt_client() != nullptr) {
+      char payload[128];
+      snprintf(payload, sizeof(payload),
+               "{\"status\":\"%s\",\"idle_ms\":%lu,\"calls\":%d,\"errors\":%d}",
+               "OK", idle, this->total_calls_, this->total_errors_);
+      App.get_mqtt_client()->publish("saj/bridge/health", payload);
+    }
+  }
+}
+
+
+void ModbusBleBridge::softReconnect() {
+  reconnect_attempts_++;
+  ESP_LOGW(TAG, "Soft reconnect attempt %d", reconnect_attempts_);
+  if (this->parent_ && this->parent_->connected()) {
+    this->parent_->disconnect();
+    delay(500);
+    this->parent_->connect();
+  }
+  if (reconnect_attempts_ >= max_reconnect_attempts_) {
+    ESP_LOGE(TAG, "Too many reconnect attempts, performing hard reset");
+    hardReset();
+  }
+}
+
+void ModbusBleBridge::hardReset() {
+  ESP_LOGE(TAG, "Hard reset triggered");
+  // Drenar cola interna
+  std::queue<modbus_saj::ModbusTCPRequest> empty;
+  std::swap(this->pending_requests_, empty);
+  delay(200);
+  esp_restart();
 }
 
 void ModbusBleBridge::startModbusTCPServer() {
@@ -221,6 +273,13 @@ void ModbusBleBridge::dump_config() {
 void ModbusBleBridge::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if,
                                           esp_ble_gattc_cb_param_t *param) {
   switch (event) {
+    case ESP_GATTC_NOTIFY_EVT: {
+      // Al recibir notify correcto, marcar frame válido
+      last_good_frame_ms_ = millis();
+      reconnect_attempts_ = 0;
+      ESP_LOGI(TAG, "BLE notify received");
+      break;
+    }
     case ESP_GATTC_OPEN_EVT: {
       ESP_LOGD(TAG, "[gattc_event_handler] ESP_GATTC_OPEN_EVT");
       if (param->open.status == ESP_GATT_OK) {
