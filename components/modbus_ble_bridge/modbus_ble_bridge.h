@@ -2,6 +2,7 @@
 
 #include "esphome/core/component.h"
 #include "esphome/core/log.h"
+#include "esphome/components/esp32_ble_tracker/ble_client.h"
 #include "modbus_types.h"
 
 namespace esphome {
@@ -46,16 +47,11 @@ class ModbusBleBridge : public Component {
   // Última petición Modbus
   modbus_saj::ModbusTCPRequest modbus_tcp_request;
 
-  // Características BLE
-  void set_parent(void* parent) { this->parent_ = parent; }
-  void* parent_{nullptr};
-  void* char_read_{nullptr};
-
+  // Cliente BLE del wrapper
+  esp32_ble_client::BLEClient* parent_{nullptr};
+  esp32_ble_client::BLECharacteristic* char_read_{nullptr};
+  esp32_ble_client::BLECharacteristic* char_write_{nullptr};
 };
-
-}  // namespace modbus_ble_bridge
-}  // namespace esphome
-
 
 }  // namespace modbus_ble_bridge
 }  // namespace esphome
