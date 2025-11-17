@@ -25,6 +25,8 @@ class ModbusBleBridge : public Component {
   void handleTCPConnection();
   void handleModbusTCP();
   void sendBLERequest(const modbus_saj::ModbusBLERequest &request);
+  void gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if,
+                           esp_ble_gattc_cb_param_t *param);
 
   // --- Variables de estado ---
   uint16_t modbus_port_{502};              // Puerto TCP por defecto
@@ -46,6 +48,9 @@ class ModbusBleBridge : public Component {
 
   // Última petición Modbus
   modbus_saj::ModbusTCPRequest modbus_tcp_request;
+
+  // Buffer de petición TCP
+  std::vector<uint8_t> modbus_request_v;
 
   // Cliente BLE del wrapper
   esp32_ble_client::BLEClient* parent_{nullptr};
