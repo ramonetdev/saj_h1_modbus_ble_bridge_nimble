@@ -3,6 +3,8 @@
 #include <queue>
 #include <algorithm>
 #include "esphome/components/mqtt/mqtt_client.h"
+#include "modbus_ble_bridge.h"
+
 
 #define BLE_SERVICE 0xFFFF
 #define BLE_CHAR_READ 0xFF02
