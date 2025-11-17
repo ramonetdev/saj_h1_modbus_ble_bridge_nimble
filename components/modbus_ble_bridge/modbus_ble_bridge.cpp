@@ -273,13 +273,6 @@ void ModbusBleBridge::dump_config() {
 void ModbusBleBridge::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if,
                                           esp_ble_gattc_cb_param_t *param) {
   switch (event) {
-    case ESP_GATTC_NOTIFY_EVT: {
-      // Al recibir notify correcto, marcar frame válido
-      last_good_frame_ms_ = millis();
-      reconnect_attempts_ = 0;
-      ESP_LOGI(TAG, "BLE notify received");
-      break;
-    }
     case ESP_GATTC_OPEN_EVT: {
       ESP_LOGD(TAG, "[gattc_event_handler] ESP_GATTC_OPEN_EVT");
       if (param->open.status == ESP_GATT_OK) {
@@ -292,10 +285,12 @@ void ModbusBleBridge::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_i
       }
       break;
     }
+
     case ESP_GATTC_CFG_MTU_EVT: {
       ESP_LOGD(TAG, "[gattc_event_handler] ESP_GATTC_CFG_MTU_EVT: MTU updated to %d", param->cfg_mtu.mtu);
       break;
     }
+
     case ESP_GATTC_DISCONNECT_EVT: {
       ESP_LOGD(TAG, "[gattc_event_handler] ESP_GATTC_DISCONNECT_EVT");
       ESP_LOGI(TAG, "BLE device disconnected");
@@ -312,6 +307,7 @@ void ModbusBleBridge::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_i
   #endif
       break;
     }
+
     case ESP_GATTC_SEARCH_CMPL_EVT: {
       ESP_LOGD(TAG, "[gattc_event_handler] ESP_GATTC_SEARCH_CMPL_EVT");
       this->char_read_ = this->parent_->get_characteristic(BLE_SERVICE, BLE_CHAR_READ);
@@ -320,18 +316,15 @@ void ModbusBleBridge::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_i
         break;
       }
       ESP_LOGD(TAG, "Found read characteristic");
-      auto status = esp_ble_gattc_register_for_notify(this->parent_->get_gattc_if(), this->parent_->get_remote_bda(),
+      auto status = esp_ble_gattc_register_for_notify(this->parent_->get_gattc_if(),
+                                                      this->parent_->get_remote_bda(),
                                                       this->char_read_->handle);
-
       if (status) {
         ESP_LOGW(TAG, "esp_ble_gattc_register_for_notify failed, status=%d", status);
       }
       break;
     }
-    case ESP_GATTC_REG_FOR_NOTIFY_EVT: {
-      ESP_LOGD(TAG, "[gattc_event_handler] ESP_GATTC_REG_FOR_NOTIFY_EVT");
-      break;
-    }
+
     case ESP_GATTC_NOTIFY_EVT: {
       bool client_ok = false;
   #if defined(ARDUINO)
@@ -342,17 +335,24 @@ void ModbusBleBridge::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_i
       if (param->notify.handle != this->char_read_->handle || !client_ok) {
         break;
       }
+
+      // Reset watchdog
       this->waiting_ble_response = false;
       this->waiting_since_ = 0;
+      last_good_frame_ms_ = millis();
+      reconnect_attempts_ = 0;
+
       const uint8_t *pData = param->notify.value;
       size_t length = param->notify.value_len;
       ESP_LOGI(TAG, "BLE notify received");
-      ESP_LOGD(
-        TAG, "BLE notify: length=%d, expected=%d, registers=%d",
-        length, modbus_tcp_request.getNumberOfRegisters() + 7, modbus_tcp_request.getNumberOfRegisters());
 
+      ESP_LOGD(TAG, "BLE notify: length=%d, expected=%d, registers=%d",
+               length, modbus_tcp_request.getNumberOfRegisters() + 7,
+               modbus_tcp_request.getNumberOfRegisters());
+
+      // Validación de respuesta
       if (modbus_tcp_request.getFunctionCode() == 6) {
-        ESP_LOGI(TAG, "Write command response - flushing client. Closing TCP client after write single register response");
+        ESP_LOGI(TAG, "Write single register response - closing TCP client");
   #if defined(ARDUINO)
         this->client_.stop();
   #else
@@ -363,15 +363,14 @@ void ModbusBleBridge::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_i
   #endif
         break;
       }
+
       if ((static_cast<int>(length) - 7) != modbus_tcp_request.getNumberOfRegisters()) {
         this->errlen_++;
-        ESP_LOGW(
-          TAG, "Wrong response length (error %d): expected %d registers, got %d bytes",
-          this->errlen_, modbus_tcp_request.getNumberOfRegisters(), (int)length - 7);
+        ESP_LOGW(TAG, "Wrong response length (error %d): expected %d registers, got %d bytes",
+                 this->errlen_, modbus_tcp_request.getNumberOfRegisters(), (int)length - 7);
 
         if (this->errlen_ > 5) {
-          ESP_LOGE(TAG, "Too many length errors (5) - resetting connection");
-          ESP_LOGE(TAG, "Closing TCP client due to repeated length errors");
+          ESP_LOGE(TAG, "Too many length errors - closing TCP client");
   #if defined(ARDUINO)
           this->client_.stop();
   #else
@@ -383,17 +382,12 @@ void ModbusBleBridge::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_i
         }
         break;
       }
-      ESP_LOGD(TAG, "Received correct BLE response length");
+
       this->errlen_ = 0;
-
       modbus_saj::ModbusBLEResponse ble_resp(pData, length);
-      std::vector<uint8_t> data = ble_resp.getData();
-      ESP_LOGD(TAG, "Response byte count: %d", data.size() - 1);
-
-      const uint8_t *data_ptr = data.data();
-
       modbus_saj::ModbusTCPResponse modbus_resp(modbus_tcp_request, ble_resp);
       std::vector<uint8_t> modbus_resp_bytes = modbus_resp.toBytes();
+
       ESP_LOGI(TAG, "Sending Modbus/TCP response of %d bytes", modbus_resp_bytes.size());
 
   #if defined(ARDUINO)
@@ -410,6 +404,7 @@ void ModbusBleBridge::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_i
   #endif
       break;
     }
+
     default:
       break;
   }
