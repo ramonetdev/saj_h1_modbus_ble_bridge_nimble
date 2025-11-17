@@ -1,7 +1,7 @@
 #include <esphome/core/log.h>
 #include "esphome/core/application.h"        
 #include "esphome/components/esp32_ble_tracker/esp32_ble_tracker.h"
-#include "esphome/components/esp32_ble_client/esp32_ble_client.h"  
+#include "esphome/components/esp32_ble_client/ble_client.h"  
 #include <queue>
 #include <algorithm>
 #include "esphome/components/mqtt/mqtt_client.h"
