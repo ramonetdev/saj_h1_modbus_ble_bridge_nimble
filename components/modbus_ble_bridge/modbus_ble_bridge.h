@@ -4,10 +4,10 @@
 #include "esphome/core/log.h"
 #include "modbus_types.h"
 
-// Forward declaration del cliente BLE
+// Forward declarations del cliente BLE
 namespace esphome {
 namespace esp32_ble_client {
-  class ESP32BLEClient;
+  class BLEClient;
   class BLECharacteristic;
 }
 }
@@ -53,8 +53,8 @@ class ModbusBleBridge : public Component {
   modbus_saj::ModbusTCPRequest modbus_tcp_request;
   std::vector<uint8_t> modbus_request_v;
 
-  // Cliente BLE del wrapper
-  esphome::esp32_ble_client::ESP32BLEClient* parent_{nullptr};
+  // Cliente BLE
+  esphome::esp32_ble_client::BLEClient* parent_{nullptr};
   esphome::esp32_ble_client::BLECharacteristic* char_read_{nullptr};
   esphome::esp32_ble_client::BLECharacteristic* char_write_{nullptr};
 };
