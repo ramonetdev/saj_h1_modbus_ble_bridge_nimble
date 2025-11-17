@@ -1,5 +1,5 @@
 #include <esphome/core/log.h>
-#include <NimBLEDevice.h>
+#include "esphome/components/esp32_ble_tracker/esp32_ble_tracker.h"
 #include <queue>
 #include <algorithm>
 #include "esphome/components/mqtt/mqtt_client.h"
