@@ -2,7 +2,7 @@
 
 #include "esphome/core/component.h"
 #include "esphome/core/log.h"
-#include "esphome/components/esp32_ble_client/ble_client.h"   // ✅ cliente BLE correcto
+#include "esphome/components/esp32_ble_client/esp32_ble_client.h"   // ✅ cliente BLE correcto
 #include "modbus_types.h"
 
 namespace esphome {
@@ -53,7 +53,7 @@ class ModbusBleBridge : public Component {
   std::vector<uint8_t> modbus_request_v;
 
   // Cliente BLE del wrapper
-  esphome::esp32_ble_client::BLEClient* parent_{nullptr};
+  esphome::esp32_ble_client::ESP32BLEClient* parent_{nullptr};
   esphome::esp32_ble_client::BLECharacteristic* char_read_{nullptr};
   esphome::esp32_ble_client::BLECharacteristic* char_write_{nullptr};
 };
